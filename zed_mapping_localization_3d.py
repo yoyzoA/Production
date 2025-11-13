@@ -45,6 +45,7 @@ def start_mapping():
 
     mapping_params = sl.SpatialMappingParameters()
     zed.enable_spatial_mapping(mapping_params)
+    
     print("🗺️  Mapping started. Move camera to explore the room.")
     return True
 
@@ -59,15 +60,25 @@ def stop_and_save_mapping():
 
 
 def start_localization():
-    """Load existing map and start localization."""
+    """Load existing map and start localization (SDK 5.1 Python)."""
     if not os.path.exists(AREA_FILE):
         print(f"❌ No '{AREA_FILE}' found. Run mapping first.")
         return False
 
     tracking_params = sl.PositionalTrackingParameters()
-    tracking_params.load_area_file(AREA_FILE)
+
+    # Correct member for area file load
+    tracking_params.area_file_path = AREA_FILE
+
+    # Enable area memory (loop-closure / area reuse)
     tracking_params.enable_area_memory = True
+
+    # Note: enable_relocalization is not available in Python binding.
+    # We'll rely on enable_area_memory and area_file_path to handle localization.
+
+    # IMU fusion (if IMU exists)
     tracking_params.enable_imu_fusion = True
+
     err = zed.enable_positional_tracking(tracking_params)
     if err != sl.ERROR_CODE.SUCCESS:
         print("❌ Failed to start localization:", err)
@@ -75,6 +86,8 @@ def start_localization():
 
     print(f"📍 Localization started using '{AREA_FILE}'.")
     return True
+
+
 
 
 def stop_localization():
