@@ -18,6 +18,11 @@ import java.net.HttpURLConnection
 import java.net.URL
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
+import org.json.JSONObject
+import java.io.IOException
+
 
 class DashboardFragment : Fragment() {
 
@@ -25,7 +30,11 @@ class DashboardFragment : Fragment() {
     private val binding get() = _binding!!
 
     // MJPEG stream
-    private val streamUrl = "http://10.0.2.2:5000/video" // emulator → host
+    private val streamUrl = "http://10.0.2.2:5000/video"
+
+    // Rover API on Pi
+    private val roverUrl = "http://10.0.2.2:5000/cmd"
+    private val httpClient = OkHttpClient()
 
     // Recording
     private var recordingJob: Job? = null
@@ -52,17 +61,61 @@ class DashboardFragment : Fragment() {
 
         setupWebView()
 
+        // ─────────────────────────────────────────────
+        // RECORDING BUTTONS
+        // ─────────────────────────────────────────────
         binding.btnRecord.setOnClickListener {
-            if (recordingJob == null) {
-                startRecording()
-            }
+            if (recordingJob == null) startRecording()
         }
 
         binding.btnStop.setOnClickListener {
             stopRecording()
         }
+
+        // ─────────────────────────────────────────────
+        // ROVER CONTROL BUTTONS
+        // ─────────────────────────────────────────────
+        binding.btnForward.setOnClickListener { sendRoverCommand("forward") }
+        binding.btnLeft.setOnClickListener { sendRoverCommand("left") }
+        binding.btnRight.setOnClickListener { sendRoverCommand("right") }
+        binding.btnHalt.setOnClickListener { sendRoverCommand("stop") }
     }
 
+
+    // ─────────────────────────────────────────────
+    // SEND COMMAND TO RASPBERRY PI
+    // ─────────────────────────────────────────────
+    private fun sendRoverCommand(direction: String) {
+        val json = JSONObject()
+        json.put("direction", direction)
+        json.put("speed", 0.20)
+
+        val body = RequestBody.create(
+            "application/json; charset=utf-8".toMediaType(),
+            json.toString()
+        )
+
+        val request = Request.Builder()
+            .url(roverUrl)
+            .post(body)
+            .build()
+
+        httpClient.newCall(request).enqueue(object : Callback {
+
+            override fun onFailure(call: Call, e: IOException) {
+                println("❌ Rover command failed: $e")
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                println("✔ Rover response: ${response.body?.string()}")
+            }
+        })
+    }
+
+
+    // ─────────────────────────────────────────────
+    // LIVE VIDEO FEED
+    // ─────────────────────────────────────────────
     private fun setupWebView() {
         val webView = binding.webview
         webView.settings.javaScriptEnabled = true
@@ -72,15 +125,17 @@ class DashboardFragment : Fragment() {
         webView.loadUrl(streamUrl)
     }
 
+
+    // ─────────────────────────────────────────────
+    // RECORDING MJPEG STREAM (UNCHANGED)
+    // ─────────────────────────────────────────────
     private fun startRecording() {
         if (recordingJob != null) return
 
         isRecording = true
 
-        // Show indicator
         requireActivity().runOnUiThread {
-            val indicator = binding.recordIndicator
-            indicator.visibility = View.VISIBLE
+            binding.recordIndicator.visibility = View.VISIBLE
         }
 
         recordingJob = CoroutineScope(Dispatchers.IO).launch {
@@ -93,7 +148,6 @@ class DashboardFragment : Fragment() {
         recordingJob?.cancel()
         recordingJob = null
 
-        // Hide indicator
         requireActivity().runOnUiThread {
             binding.recordIndicator.clearAnimation()
             binding.recordIndicator.visibility = View.GONE
@@ -103,13 +157,11 @@ class DashboardFragment : Fragment() {
     private fun createMediaStoreVideoFile(): File {
         val path = "/storage/emulated/0/Movies/MyAppRecordings/"
         val folder = File(path)
-        if (!folder.exists()) {
-            folder.mkdirs()
-        }
+        if (!folder.exists()) folder.mkdirs()
+
         val filename = "mirna_stream_${System.currentTimeMillis()}.mp4"
         return File(folder, filename)
     }
-
 
     /**
      * Open the MJPEG stream, extract JPEG frames, transcode to MP4 using MediaCodec + MediaMuxer
